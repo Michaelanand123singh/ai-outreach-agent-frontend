@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import './App.css';
 
-// Get the API URL from environment variables or use a default for local development
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+// Base URL for the backend API
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://ai-outreach-agent-backend-2.onrender.com';
 
 function App() {
   const [file, setFile] = useState(null);
@@ -38,7 +38,7 @@ function App() {
     formData.append('excelFile', file);
 
     try {
-      const response = await fetch(`${API_URL}/api/process`, {
+      const response = await fetch(`${API_BASE_URL}/api/process`, {
         method: 'POST',
         body: formData,
       });
@@ -62,7 +62,7 @@ function App() {
       setDownloadInProgress(true);
       try {
         // Create a direct fetch request to the download endpoint
-        const response = await fetch(`${API_URL}${result.fileUrl}`);
+        const response = await fetch(`${API_BASE_URL}${result.fileUrl}`);
         
         if (!response.ok) {
           throw new Error('Download failed');
