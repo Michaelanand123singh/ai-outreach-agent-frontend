@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import './App.css';
 
-// Base URL for the backend API
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://ai-outreach-agent-backend-2.onrender.com';
 
 function App() {
@@ -13,9 +12,26 @@ function App() {
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
+    if (!selectedFile) return;
+
+    const validTypes = ['.xlsx', '.xls'];
+    const fileExt = selectedFile.name.slice(selectedFile.name.lastIndexOf('.')).toLowerCase();
+    
+    if (!validTypes.includes(fileExt)) {
+      setError('Please upload an Excel file (.xlsx or .xls)');
+      setFile(null);
+      return;
+    }
+
     setFile(selectedFile);
     setError(null);
     setResult(null);
+  };
+
+  const createFormData = () => {
+    const formData = new FormData();
+    formData.append('excelFile', file);
+    return formData;
   };
 
   const handleSubmit = async (e) => {
@@ -25,69 +41,73 @@ function App() {
       return;
     }
 
-    // Check if file is Excel
-    if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
-      setError("Please upload an Excel file (.xlsx or .xls)");
-      return;
-    }
-
     setIsLoading(true);
     setError(null);
-
-    const formData = new FormData();
-    formData.append('excelFile', file);
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/process`, {
         method: 'POST',
-        body: formData,
+        body: createFormData(),
+        credentials: 'include',
+        headers: {
+          'Accept': 'application/json'
+        }
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Something went wrong');
+        const errorText = await response.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          throw new Error(`Server error: ${response.status}`);
+        }
+        throw new Error(errorData.error || errorData.message || 'Processing failed');
       }
 
       const data = await response.json();
       setResult(data);
     } catch (err) {
-      setError(err.message || 'Failed to process file');
+      setError(err.message);
+      console.error('API Error:', err);
     } finally {
       setIsLoading(false);
     }
   };
 
   const downloadResults = async () => {
-    if (result && result.fileUrl) {
-      setDownloadInProgress(true);
-      try {
-        // Create a direct fetch request to the download endpoint
-        const response = await fetch(`${API_BASE_URL}${result.fileUrl}`);
-        
-        if (!response.ok) {
-          throw new Error('Download failed');
-        }
-        
-        // Get the blob from the response
-        const blob = await response.blob();
-        
-        // Create a temporary download link
-        const downloadUrl = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = downloadUrl;
-        a.download = 'outreach_results.xlsx';
-        
-        // Append to the document, click, and clean up
-        document.body.appendChild(a);
-        a.click();
+    if (!result?.fileUrl) return;
+
+    setDownloadInProgress(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}${result.fileUrl}`, {
+        credentials: 'include'
+      });
+
+      if (!response.ok) {
+        throw new Error(`Download failed with status ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = 'outreach_results.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      
+      setTimeout(() => {
         window.URL.revokeObjectURL(downloadUrl);
         document.body.removeChild(a);
-      } catch (err) {
-        setError('Failed to download the file: ' + err.message);
-      } finally {
-        setDownloadInProgress(false);
-      }
+      }, 100);
+    } catch (err) {
+      console.error('Download error:', err);
+      setError('Failed to download: ' + err.message);
+    } finally {
+      setDownloadInProgress(false);
     }
   };
 
@@ -107,44 +127,58 @@ function App() {
                 type="file" 
                 id="excelFile" 
                 onChange={handleFileChange} 
-                accept=".xlsx, .xls"
+                accept=".xlsx,.xls"
                 className="file-input"
+                disabled={isLoading}
               />
               <label htmlFor="excelFile" className="file-label">
-                {file ? file.name : 'Choose Excel File'}
+                {file ? file.name : 'Choose Excel File (.xlsx, .xls)'}
               </label>
             </div>
             
             <button 
               type="submit" 
-              disabled={isLoading || !file} 
+              disabled={isLoading || !file}
               className="submit-button"
             >
-              {isLoading ? 'Processing...' : 'Generate Outreach Messages'}
+              {isLoading ? (
+                <>
+                  <span className="spinner"></span>
+                  Processing...
+                </>
+              ) : 'Generate Outreach Messages'}
             </button>
           </form>
           
           {isLoading && (
             <div className="loading-container">
-              <div className="loading-spinner"></div>
-              <p>Scraping websites and generating personalized messages...</p>
-              <p className="small-text">This may take a few minutes depending on the number of websites.</p>
+              <p>Processing your file...</p>
+              <p className="small-text">
+                This may take several minutes depending on file size.
+              </p>
             </div>
           )}
           
           {error && (
             <div className="error-message">
-              <p>{error}</p>
+              <p>Error: {error}</p>
+              <button 
+                onClick={() => setError(null)}
+                className="dismiss-button"
+              >
+                Dismiss
+              </button>
             </div>
           )}
           
           {result && (
             <div className="result-container">
               <h3>Processing Complete!</h3>
-              <p>Successfully processed {result.processedCount} websites.</p>
-              <p>Found contact information for {result.contactsFound} websites.</p>
+              <p>Websites processed: {result.processedCount || 0}</p>
+              <p>Contacts found: {result.contactsFound || 0}</p>
+              
               <button 
-                onClick={downloadResults} 
+                onClick={downloadResults}
                 className="download-button"
                 disabled={downloadInProgress}
               >
@@ -157,22 +191,22 @@ function App() {
         <div className="instructions-card">
           <h2>How It Works</h2>
           <ol>
-            <li><strong>Prepare Excel File:</strong> Create an Excel file with website URLs in the first column.</li>
-            <li><strong>Upload File:</strong> Upload your Excel file using the form above.</li>
-            <li><strong>Automated Processing:</strong> Our system will:
+            <li><strong>Prepare Excel File:</strong> Column A should contain website URLs</li>
+            <li><strong>Upload File:</strong> Maximum file size 5MB</li>
+            <li><strong>Processing:</strong> Our AI will:
               <ul>
-                <li>Scrape each website for contact information</li>
-                <li>Generate personalized outreach messages with AI</li>
-                <li>Compile all data into a downloadable Excel file</li>
+                <li>Scrape each website for contact info</li>
+                <li>Generate personalized messages</li>
+                <li>Compile results</li>
               </ul>
             </li>
-            <li><strong>Download Results:</strong> Get your enhanced Excel file with contact details and outreach messages.</li>
+            <li><strong>Download:</strong> Get your enhanced Excel file</li>
           </ol>
         </div>
       </main>
 
       <footer>
-        <p>AI Outreach Agent | Automate your lead generation and outreach</p>
+        <p>AI Outreach Agent | {new Date().getFullYear()}</p>
       </footer>
     </div>
   );
